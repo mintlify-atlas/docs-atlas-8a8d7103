@@ -1,0 +1,179 @@
+---
+title: "Deploying Yoko"
+description: "Deploy Yoko to a production server using a VPS, Railway, or Render."
+---
+
+## Before You Deploy
+
+<Warning>
+  Do not run Flask's built-in development server (`debug=True`) in production. It is single-threaded, not designed for concurrent requests, and exposes a debugger that can be exploited. Use `gunicorn` instead.
+</Warning>
+
+Ensure your `requirements.txt` includes all dependencies:
+
+```txt
+flask
+requests
+gunicorn
+```
+
+Generate it automatically from your environment:
+
+```bash
+pip freeze > requirements.txt
+```
+
+Your app must be reachable at a **public HTTPS URL** for the WhatsApp webhook to function. Platforms like Railway and Render provide this automatically. On a VPS, you will need to set up a reverse proxy (e.g., nginx) with an SSL certificate (e.g., Let's Encrypt).
+
+## Deployment Options
+
+<Tabs>
+  <Tab title="VPS (DigitalOcean / Linode)">
+    ### 1. Provision a Server
+
+    Create a Ubuntu 22.04 droplet or Linode instance (the cheapest tier, ~$4–6/month, is sufficient).
+
+    ### 2. Install Dependencies
+
+    ```bash
+    sudo apt update && sudo apt install -y python3-pip python3-venv nginx certbot python3-certbot-nginx
+    git clone https://github.com/your-org/yoko.git
+    cd yoko
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    ```
+
+    ### 3. Set Environment Variables
+
+    Add your secrets to `/etc/environment` or a `.env` file (loaded via `python-dotenv`):
+
+    ```bash
+    export GROQ_API_KEY="your_groq_key"
+    export WHATSAPP_ACCESS_TOKEN="your_whatsapp_token"
+    export VERIFY_TOKEN="your_verify_token"
+    ```
+
+    ### 4. Run with Gunicorn
+
+    ```bash
+    gunicorn -w 2 app:app --bind 0.0.0.0:5000
+    ```
+
+    The `-w 2` flag sets 2 worker processes, suitable for light traffic. Increase for heavier loads.
+
+    ### 5. Set Up Nginx as a Reverse Proxy
+
+    Create `/etc/nginx/sites-available/yoko`:
+
+    ```nginx
+    server {
+        listen 80;
+        server_name your-domain.com;
+
+        location / {
+            proxy_pass http://127.0.0.1:5000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+    ```
+
+    Enable and reload:
+
+    ```bash
+    sudo ln -s /etc/nginx/sites-available/yoko /etc/nginx/sites-enabled/
+    sudo nginx -t && sudo systemctl reload nginx
+    ```
+
+    ### 6. Enable HTTPS
+
+    ```bash
+    sudo certbot --nginx -d your-domain.com
+    ```
+
+    Your public webhook URL will be `https://your-domain.com/webhook`.
+  </Tab>
+
+  <Tab title="Railway">
+    [Railway](https://railway.app/) offers a free tier and auto-deploys from GitHub.
+
+    <Steps>
+      <Step title="Connect Your Repository">
+        1. Go to [railway.app](https://railway.app/) and sign in with GitHub.
+        2. Click **New Project** → **Deploy from GitHub repo**.
+        3. Select your Yoko repository.
+      </Step>
+
+      <Step title="Set Environment Variables">
+        1. In your project, click the service → **Variables**.
+        2. Add:
+           - `GROQ_API_KEY`
+           - `WHATSAPP_ACCESS_TOKEN`
+           - `VERIFY_TOKEN`
+      </Step>
+
+      <Step title="Configure the Start Command">
+        Railway auto-detects Python apps. If needed, add a `Procfile`:
+
+        ```
+        web: gunicorn -w 2 app:app
+        ```
+      </Step>
+
+      <Step title="Get Your Public URL">
+        Railway assigns a public HTTPS URL automatically (e.g., `https://yoko-production.up.railway.app`). Use `https://yoko-production.up.railway.app/webhook` as your Meta webhook callback URL.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Render">
+    [Render](https://render.com/) offers a free tier for web services.
+
+    <Steps>
+      <Step title="Create a New Web Service">
+        1. Go to [render.com](https://render.com/) and sign in.
+        2. Click **New** → **Web Service**.
+        3. Connect your GitHub repository.
+      </Step>
+
+      <Step title="Configure the Service">
+        - **Environment:** Python
+        - **Build Command:** `pip install -r requirements.txt`
+        - **Start Command:** `gunicorn -w 2 app:app`
+      </Step>
+
+      <Step title="Set Environment Variables">
+        Under **Environment**, add:
+        - `GROQ_API_KEY`
+        - `WHATSAPP_ACCESS_TOKEN`
+        - `VERIFY_TOKEN`
+      </Step>
+
+      <Step title="Deploy and Get URL">
+        Click **Create Web Service**. Render will build and deploy your app and assign a URL like `https://yoko.onrender.com`. Use `https://yoko.onrender.com/webhook` as your Meta webhook URL.
+
+        <Note>
+          Free tier Render services spin down after 15 minutes of inactivity and take ~30 seconds to cold-start. For a production WhatsApp bot, consider upgrading to a paid instance to avoid missed messages during cold starts.
+        </Note>
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Production Checklist
+
+<CardGroup cols={2}>
+  <Card title="Use Gunicorn" icon="server">
+    Replace `app.run(debug=True)` with `gunicorn -w 2 app:app` for all production deployments.
+  </Card>
+  <Card title="Environment Variables" icon="lock">
+    Never commit `GROQ_API_KEY`, `WHATSAPP_ACCESS_TOKEN`, or `VERIFY_TOKEN` to source control.
+  </Card>
+  <Card title="HTTPS Required" icon="shield">
+    Meta only accepts webhook URLs served over HTTPS. Ensure your domain has a valid SSL certificate.
+  </Card>
+  <Card title="Public URL" icon="globe">
+    Use a permanent public URL for your webhook. Ngrok is fine for local testing but not for production.
+  </Card>
+</CardGroup>

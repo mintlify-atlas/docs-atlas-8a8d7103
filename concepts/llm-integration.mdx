@@ -1,0 +1,127 @@
+---
+title: 'LLM integration'
+description: 'How Yoko connects to the Groq API, constructs prompts, and extracts responses from the LLaMA 3 8B model.'
+keywords: ['groq', 'llm', 'llama', 'prompt', 'api', 'temperature']
+---
+
+Yoko uses the [Groq](https://groq.com) inference API to generate answers. The model is **LLaMA 3 8B** (`llama3-8b-8192`), called from `llm.py` using a standard HTTP request.
+
+<Note>
+The Groq API is fully compatible with the OpenAI Chat Completions specification. The endpoint, request body shape, and response structure are identical to `api.openai.com/v1/chat/completions`. Any OpenAI client library can be pointed at Groq by changing the base URL and API key.
+</Note>
+
+## API details
+
+<Columns cols={2}>
+  <Card title="Endpoint" icon="globe">
+    `https://api.groq.com/openai/v1/chat/completions`
+  </Card>
+  <Card title="Model" icon="cpu">
+    `llama3-8b-8192` — LLaMA 3 8B with an 8,192-token context window
+  </Card>
+</Columns>
+
+## Authentication
+
+Requests are authenticated with a bearer token in the `Authorization` header:
+
+```python llm.py
+headers = {
+    "Authorization": f"Bearer {GROQ_API_KEY}",
+    "Content-Type": "application/json"
+}
+```
+
+`GROQ_API_KEY` is defined as a module-level variable at the top of `llm.py`. Replace the empty string with your key obtained from the [Groq console](https://console.groq.com).
+
+<Warning>
+Do not commit your API key to source control. Move `GROQ_API_KEY` to an environment variable or a `.env` file and read it with `os.environ.get("GROQ_API_KEY")`.
+</Warning>
+
+## Prompt construction
+
+Each call to `consultar_llm` builds a two-message conversation array:
+
+```python llm.py
+messages = [
+    {
+        "role": "system",
+        "content": f"Eres un asistente universitario responde usando solo esta información: {contexto}"
+    },
+    {
+        "role": "user",
+        "content": pregunta
+    }
+]
+```
+
+| Role | Content | Purpose |
+|---|---|---|
+| `system` | Persona instruction + retrieved context from `data.json` | Constrains the model to answer only from the provided text |
+| `user` | The original WhatsApp message | The question the model must answer |
+
+The system prompt instructs the model to act as a university assistant and to answer **only** using the injected `contexto`. This prevents the model from fabricating information not present in the knowledge base.
+
+## Request body
+
+The full request payload sent to the Groq API:
+
+```python llm.py
+data = {
+    "model": "llama3-8b-8192",
+    "messages": messages,
+    "temperature": 0.3
+}
+```
+
+### The temperature parameter
+
+`temperature` controls how deterministic the model's output is. Values closer to `0` make the model more focused and repetitive; values closer to `1` make it more creative and varied.
+
+Yoko uses `temperature: 0.3` because:
+
+- The task is factual Q&A, not creative writing. Low temperature reduces the chance of the model paraphrasing or embellishing the provided context.
+- Users expect consistent answers to the same question. A low temperature means two identical queries are likely to produce nearly identical replies.
+- The context is already narrow (a single retrieved snippet), so there is little need for the model to explore alternative completions.
+
+<Tip>
+If you expand Yoko to handle open-ended questions or conversational exchanges, consider raising the temperature to `0.5`–`0.7` for more natural-sounding responses.
+</Tip>
+
+## Response extraction
+
+The Groq API returns a JSON object in the standard OpenAI format. Yoko extracts the generated text as follows:
+
+```python llm.py
+result = response.json()
+if "choices" in result:
+    return result["choices"][0]["message"]["content"]
+```
+
+The response path is:
+
+```
+result
+└─ ["choices"][0]
+   └─ ["message"]
+      └─ ["content"]   → the generated text string
+```
+
+## Error handling
+
+The current implementation has minimal error handling:
+
+- The function only returns a value when `"choices"` is present in the response. If the API returns an error (e.g. `400 Bad Request`, `401 Unauthorized`, `429 Rate Limit Exceeded`), the `choices` key will be absent and the function returns `None` implicitly.
+- In `app.py`, `enviar_mensaje` is only called when `respuesta` is truthy, so a `None` response causes the bot to silently drop the message without replying to the user.
+
+<Warning>
+If you see messages that receive no reply, check whether the Groq API is returning an error. Add logging around `response.status_code` and `result` in `consultar_llm` to diagnose issues.
+</Warning>
+
+A more robust implementation would check the HTTP status code explicitly:
+
+```python
+response = requests.post(url, headers=headers, json=data)
+response.raise_for_status()  # raises HTTPError on 4xx/5xx
+result = response.json()
+```

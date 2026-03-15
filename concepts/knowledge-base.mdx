@@ -1,0 +1,127 @@
+---
+title: 'Knowledge base'
+description: 'How Yoko stores answers in data.json and uses fuzzy matching to retrieve the best-fit context for a user question.'
+keywords: ['knowledge base', 'data.json', 'fuzzy matching', 'difflib', 'retrieval']
+---
+
+Yoko answers questions by looking up pre-written answers from a JSON file rather than relying on the LLM to generate answers from scratch. This keeps responses accurate, predictable, and grounded in information you control.
+
+## data.json schema
+
+The knowledge base is a JSON array. Each element is an object with exactly two keys:
+
+```json
+[
+  {
+    "pregunta": "<question string>",
+    "respuesta": "<answer string>"
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `pregunta` | string | A representative phrasing of the question users might ask |
+| `respuesta` | string | The answer that is passed as context to the LLM |
+
+### Example file
+
+```json data.json
+[
+  {
+    "pregunta": "¿Cuál es el horario de la biblioteca?",
+    "respuesta": "La biblioteca universitaria abre de lunes a viernes de 7:00 a 21:00 y los sábados de 8:00 a 14:00."
+  },
+  {
+    "pregunta": "¿Cómo me inscribo a un curso?",
+    "respuesta": "Para inscribirte a un curso debes ingresar al portal estudiantil, seleccionar 'Inscripción de materias' y elegir las asignaturas disponibles en tu plan de estudios."
+  },
+  {
+    "pregunta": "¿Dónde queda la oficina de registro?",
+    "respuesta": "La oficina de registro se encuentra en el edificio administrativo principal, planta baja, ventanilla 3."
+  },
+  {
+    "pregunta": "¿Cuándo son los exámenes parciales?",
+    "respuesta": "Los exámenes parciales se realizan en la séptima semana del semestre. Las fechas exactas se publican en el calendario académico."
+  }
+]
+```
+
+## Fuzzy matching retrieval
+
+When a message arrives, `mcp.py` compares the user's exact phrasing against all `pregunta` values using Python's built-in `difflib` module:
+
+```python mcp.py
+mas_parecida = difflib.get_close_matches(
+    pregunta_usuario,   # the incoming message text
+    preguntas,          # list of all "pregunta" values from data.json
+    n=1,                # return at most 1 match
+    cutoff=0.4          # minimum similarity score to consider a match
+)
+```
+
+### How the similarity score works
+
+`difflib.get_close_matches` uses the `SequenceMatcher` ratio, which measures what fraction of characters the two strings share in sequence. A score of `1.0` means the strings are identical; `0.0` means they share nothing.
+
+With `cutoff=0.4`, a candidate question must be **at least 40% similar** to the user's message to qualify as a match.
+
+| Score range | Interpretation |
+|---|---|
+| `>= 0.9` | Nearly identical phrasing |
+| `0.6 – 0.9` | Clearly related question with different words |
+| `0.4 – 0.6` | Partial overlap; may or may not be the right topic |
+| `< 0.4` | No match returned |
+
+<Info>
+The cutoff of 0.4 is relatively permissive. It allows the bot to match questions even when users rephrase significantly, but it also increases the risk of retrieving a loosely related answer. Raise the cutoff (e.g. to `0.6`) if you observe incorrect matches in production.
+</Info>
+
+### Retrieval path in code
+
+Once the closest question is identified, its answer is fetched by scanning the list:
+
+```python mcp.py
+if mas_parecida:
+    for item in base:
+        if item["pregunta"] == mas_parecida[0]:
+            return item["respuesta"]
+```
+
+That `respuesta` string becomes the `contexto` passed to the LLM.
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="What happens when no match is found?">
+    If `get_close_matches` returns an empty list (no stored question meets the 0.4 cutoff), `buscar_contexto` returns the string:
+
+    ```
+    "No se encontró información relevante."
+    ```
+
+    This string is passed as the context to `consultar_llm`. The LLM receives a system prompt instructing it to answer using only that context, so it will typically reply that it does not have information on the topic rather than hallucinating an answer.
+
+    To handle this case more gracefully, you can detect the fallback string in `manejar_query` before calling the LLM and return a fixed "I don't know" message directly.
+  </Accordion>
+
+  <Accordion title="Can a single question have multiple phrasings?">
+    Not natively. Each entry has one `pregunta` string. If users ask the same question in many different ways, consider adding separate entries that share the same `respuesta`, one per common phrasing.
+  </Accordion>
+
+  <Accordion title="Is data.json reloaded on every request?">
+    Yes. `buscar_contexto` opens and parses `data.json` on every call. For small knowledge bases this is fine, but for large files you may want to load the data once at startup and keep it in memory.
+  </Accordion>
+</AccordionGroup>
+
+## Tips for writing good entries
+
+<Tip>
+Write each `pregunta` the way a real student would type it in WhatsApp — casual, possibly with abbreviations. The fuzzy matcher compares character sequences, so natural phrasing outperforms formal or academic wording.
+</Tip>
+
+- **Be specific.** "¿Cuál es el horario de la biblioteca?" matches better than "información biblioteca".
+- **Cover common variants.** If users ask the same thing multiple ways, add multiple entries pointing to the same answer.
+- **Keep answers self-contained.** The `respuesta` is injected directly into the LLM prompt, so it should make sense without additional context.
+- **Avoid ambiguous questions.** If two stored questions are very similar, `get_close_matches` may return the wrong one. Rewrite them to be more distinct.
+- **Test with real messages.** Run `difflib.get_close_matches("your test input", preguntas, n=3, cutoff=0.3)` in a Python shell to verify which entries your questions hit.

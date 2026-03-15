@@ -1,0 +1,117 @@
+---
+title: "WhatsApp Business Setup"
+description: "Configure a Meta WhatsApp Business App to connect with Yoko's webhook."
+---
+
+## Prerequisites
+
+- A [Meta Developer](https://developers.facebook.com/) account
+- A business phone number (can be any number not already registered with WhatsApp)
+- Your Yoko app deployed and reachable at a public HTTPS URL
+
+<Warning>
+  Never hardcode access tokens or secrets directly in source code. Use environment variables or a secrets manager, especially before pushing to any public repository.
+</Warning>
+
+## Steps
+
+<Steps>
+  <Step title="Create a Meta App">
+    1. Go to [developers.facebook.com](https://developers.facebook.com/) and log in.
+    2. Click **My Apps** → **Create App**.
+    3. Select **Business** as the app type and click **Next**.
+    4. Enter an app name (e.g., `Yoko Bot`) and a contact email, then click **Create App**.
+  </Step>
+
+  <Step title="Add the WhatsApp Product">
+    1. In your app's dashboard, scroll down to **Add Products to Your App**.
+    2. Find **WhatsApp** and click **Set Up**.
+    3. You will be taken to the **WhatsApp** section of your app.
+  </Step>
+
+  <Step title="Get Your Phone Number ID">
+    1. In the left sidebar, go to **WhatsApp** → **API Setup**.
+    2. Under **Send and receive messages**, you will see a **From** phone number dropdown.
+    3. Copy the **Phone Number ID** shown below the dropdown — you will need this for the API URL.
+
+    <Note>
+      Meta provides a free test phone number for development. You can use it to send messages to up to 5 recipient numbers without a real business number. This is sufficient for local testing.
+    </Note>
+  </Step>
+
+  <Step title="Generate a Permanent Access Token">
+    Temporary tokens expire after 24 hours. To get a permanent token:
+
+    1. Go to **Business Settings** → **System Users** → **Add**.
+    2. Create a system user with **Admin** role.
+    3. Click **Generate New Token**, select your app, and grant the `whatsapp_business_messaging` permission.
+    4. Copy and store the token securely.
+
+    <Warning>
+      The token is shown only once. Store it in a password manager or environment variable immediately.
+    </Warning>
+  </Step>
+
+  <Step title="Configure the Webhook">
+    1. In your app dashboard, go to **WhatsApp** → **Configuration**.
+    2. Under **Webhook**, click **Edit**.
+    3. Set the **Callback URL** to your public server URL followed by `/webhook`, for example:
+       ```
+       https://your-server.com/webhook
+       ```
+    4. Set the **Verify Token** to any string you choose (e.g., `my_secret_token`). You will use this same value in `app.py`.
+    5. Click **Verify and Save**. Meta will send a `GET` request to your endpoint to confirm it responds correctly.
+    6. After saving, click **Manage** next to **Webhook Fields** and subscribe to the `messages` field.
+  </Step>
+
+  <Step title="Update app.py with Your Token and URL">
+    Open `app.py` and update `VERIFY_TOKEN` to match what you entered in the Meta dashboard:
+
+    ```python
+    VERIFY_TOKEN = "my_secret_token"  # Must match the Meta webhook config
+    ```
+
+    Then update `enviar_mensaje()` with your Phone Number ID and access token:
+
+    ```python
+    def enviar_mensaje(numero, texto):
+        PHONE_NUMBER_ID = "your_phone_number_id"
+        ACCESS_TOKEN = "your_permanent_access_token"
+
+        url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "text",
+            "text": {"body": texto}
+        }
+        response = requests.post(url, headers=headers, json=payload)
+    ```
+
+    The WhatsApp Business API send-message URL format is:
+    ```
+    https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages
+    ```
+
+    <Warning>
+      Do not commit `ACCESS_TOKEN` to source control. Move it to an environment variable:
+      ```python
+      import os
+      ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN")
+      ```
+    </Warning>
+  </Step>
+</Steps>
+
+## Verifying the Integration
+
+Once everything is configured, send a WhatsApp message to your registered test number. You should see the incoming message logged in your server and receive an automated reply from Yoko.
+
+If the webhook verification fails, check that:
+- Your server is publicly reachable over HTTPS
+- The `VERIFY_TOKEN` in `app.py` exactly matches what you entered in the Meta dashboard
+- Your server returns the `hub.challenge` value with a `200` status on `GET /webhook`

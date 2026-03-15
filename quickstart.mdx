@@ -1,80 +1,172 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Run Yoko locally and receive your first AI-powered WhatsApp reply in under 10 minutes.
+keywords: ['quickstart', 'setup', 'local', 'flask', 'groq', 'ngrok', 'whatsapp']
 ---
 
-## Get started in three steps
+<Note>
+  You need a **WhatsApp Business account** and a Meta developer app to receive and send messages through the WhatsApp Business API. If you haven't set that up yet, follow the [WhatsApp setup guide](/guides/whatsapp-setup) first.
+</Note>
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you start, make sure you have the following:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+| Requirement | Details |
+|---|---|
+| Python 3.8+ | [python.org/downloads](https://www.python.org/downloads/) |
+| pip | Bundled with Python 3.4+ |
+| Groq API key | Free at [console.groq.com](https://console.groq.com) |
+| ngrok | [ngrok.com/download](https://ngrok.com/download) — exposes your local server to the internet so the WhatsApp webhook can reach it |
+| WhatsApp Business account | Required to configure a webhook and send/receive messages |
 
-### Step 2: Deploy your changes
+---
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Setup
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Steps>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/juliorbk/yoko.git
+    cd yoko
+    ```
+  </Step>
 
-### Step 3: Go live
+  <Step title="Install dependencies">
+    Yoko requires only two packages: `flask` for the webhook server and `requests` for HTTP calls to the Groq API and WhatsApp Business API.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <CodeGroup>
 
-## Next steps
+    ```bash pip
+    pip install flask requests
+    ```
 
-Now that you have your docs running, explore these key features:
+    ```bash pip3
+    pip3 install flask requests
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create your knowledge base">
+    Yoko answers questions by fuzzy-matching incoming messages against a local `data.json` file. Create this file in the project root:
+
+    ```json data.json
+    [
+      {
+        "pregunta": "¿Cuándo es el período de inscripciones?",
+        "respuesta": "El período de inscripciones para el semestre 2025-1 es del 10 al 20 de enero de 2025."
+      },
+      {
+        "pregunta": "¿Cuál es el horario de la biblioteca?",
+        "respuesta": "La biblioteca universitaria está abierta de lunes a viernes de 7:00 a.m. a 9:00 p.m., y los sábados de 8:00 a.m. a 2:00 p.m."
+      },
+      {
+        "pregunta": "¿Dónde queda la oficina de registro?",
+        "respuesta": "La oficina de registro académico se encuentra en el edificio administrativo, planta baja, ventanilla 3."
+      }
+    ]
+    ```
+
+    Each object requires a `pregunta` (the question used for matching) and a `respuesta` (the context passed to the LLM). Add as many pairs as your use case needs.
+
+    <Tip>
+      The fuzzy matcher in `mcp.py` uses a similarity cutoff of `0.4`. Write questions in the same natural phrasing your users are likely to send.
+    </Tip>
+  </Step>
+
+  <Step title="Set your environment variables">
+    Open `llm.py` and replace the empty string with your Groq API key:
+
+    ```python llm.py
+    GROQ_API_KEY = "gsk_your_key_here"  # your Groq API key
+    GROQ_MODEL = "llama3-8b-8192"
+    ```
+
+    Open `app.py` and set `VERIFY_TOKEN` to any string you choose — you will use this same value when registering the webhook in the Meta dashboard:
+
+    ```python app.py
+    VERIFY_TOKEN = "my-secret-token"  # match this in your WhatsApp webhook config
+    ```
+
+    <Warning>
+      Do not commit your `GROQ_API_KEY` to version control. Consider moving secrets to a `.env` file and loading them with `python-dotenv` before deploying.
+    </Warning>
+  </Step>
+
+  <Step title="Run the Flask server">
+    ```bash
+    python app.py
+    ```
+
+    You should see output similar to:
+
+    ```
+     * Running on http://127.0.0.1:5000
+     * Debug mode: on
+    ```
+
+    The server listens on port `5000` by default. Leave this terminal open.
+  </Step>
+
+  <Step title="Expose your local server with ngrok">
+    Open a new terminal and run:
+
+    ```bash
+    ngrok http 5000
+    ```
+
+    ngrok will print a public HTTPS URL, for example:
+
+    ```
+    Forwarding  https://a1b2-203-0-113-1.ngrok-free.app -> http://localhost:5000
+    ```
+
+    Copy the `https://` URL — you'll need it in the next step.
+
+    <Note>
+      Free ngrok URLs change every time you restart ngrok. You'll need to update the webhook URL in the Meta dashboard each time. For a permanent URL, use a paid ngrok plan or deploy to a cloud server.
+    </Note>
+  </Step>
+
+  <Step title="Configure the WhatsApp webhook">
+    In your [Meta for Developers](https://developers.facebook.com/) app:
+
+    1. Go to **WhatsApp** → **Configuration** → **Webhook**.
+    2. Set the **Callback URL** to your ngrok URL followed by `/webhook`:
+       ```
+       https://a1b2-203-0-113-1.ngrok-free.app/webhook
+       ```
+    3. Set the **Verify token** to the same value you put in `VERIFY_TOKEN` inside `app.py`.
+    4. Click **Verify and save**.
+    5. Subscribe to the **messages** webhook field.
+
+    Meta will send a `GET /webhook` request with a challenge to verify ownership. Yoko responds automatically when the token matches.
+
+    <Warning>
+      The `enviar_mensaje` function in `app.py` also requires a valid WhatsApp Business API URL and a Bearer token to send replies. Set these before testing end-to-end message delivery. See the [WhatsApp setup guide](/guides/whatsapp-setup) for details.
+    </Warning>
+  </Step>
+
+</Steps>
+
+---
+
+## Test it
+
+Send a WhatsApp message to your business phone number. If everything is configured correctly:
+
+1. WhatsApp delivers the message to `POST /webhook`.
+2. `mcp.py` fuzzy-matches it against `data.json` and returns the closest answer as context.
+3. `llm.py` sends the context and question to Groq (LLaMA 3 8B).
+4. `app.py` sends the generated reply back to your WhatsApp number.
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="WhatsApp setup" icon="whatsapp" href="/guides/whatsapp-setup">
+    Configure your Meta app, phone number, and API credentials.
+  </Card>
+  <Card title="Groq setup" icon="key" href="/guides/groq-setup">
+    Create your Groq account and retrieve your API key.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

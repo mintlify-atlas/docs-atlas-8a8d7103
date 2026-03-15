@@ -1,0 +1,181 @@
+---
+title: "Customizing the Knowledge Base"
+description: "Edit data.json and llm.py to tailor Yoko's responses to your specific domain."
+---
+
+## How the Knowledge Base Works
+
+Yoko's knowledge base is a file called `data.json` — a plain JSON array of question/answer pairs. When a user sends a message:
+
+1. `mcp.py` uses Python's `difflib.get_close_matches()` to find the most similar question in `data.json`.
+2. If a match is found above the similarity threshold, its `respuesta` (answer) is passed as context to the LLM.
+3. The LLM uses that context to generate a natural-language response.
+4. If no match is found, the fallback string `"No se encontró información relevante."` is sent as context.
+
+## data.json Schema
+
+Each entry in `data.json` must be an object with exactly two string fields:
+
+```json
+[
+  {
+    "pregunta": "The question or topic phrase",
+    "respuesta": "The answer or information to provide"
+  }
+]
+```
+
+`pregunta` is what `difflib` matches against the user's message. `respuesta` is the context fed to the LLM — it can be a long, detailed passage.
+
+## Full Example data.json
+
+Here is a complete example with 6 entries for a university assistant:
+
+```json
+[
+  {
+    "pregunta": "¿Cuáles son los horarios de la biblioteca?",
+    "respuesta": "La biblioteca central está abierta de lunes a viernes de 7:00 a.m. a 9:00 p.m., y los sábados de 8:00 a.m. a 2:00 p.m. Los domingos permanece cerrada."
+  },
+  {
+    "pregunta": "¿Cómo me inscribo a una materia?",
+    "respuesta": "Para inscribir materias debes ingresar al portal estudiantil con tu usuario y contraseña, ir a la sección 'Inscripción académica' y seleccionar las materias disponibles para tu semestre. El periodo de inscripción es del 1 al 15 de cada semestre."
+  },
+  {
+    "pregunta": "¿Cuándo son las fechas de pago de matrícula?",
+    "respuesta": "El pago de matrícula debe realizarse antes del inicio de clases. Para el primer semestre el plazo es hasta el 20 de enero, y para el segundo semestre hasta el 20 de julio. Pagos fuera de plazo tienen un recargo del 10%."
+  },
+  {
+    "pregunta": "¿Dónde queda la oficina de bienestar estudiantil?",
+    "respuesta": "La oficina de Bienestar Estudiantil está ubicada en el edificio B, segundo piso, oficina 204. Horario de atención: lunes a viernes de 8:00 a.m. a 5:00 p.m."
+  },
+  {
+    "pregunta": "¿Qué documentos necesito para grado?",
+    "respuesta": "Para iniciar el proceso de grado necesitas: paz y salvo académico y financiero, fotografías tamaño cédula, copia del documento de identidad, y haber aprobado el 100% de los créditos del programa. Solicita el formulario de grado en la Secretaría Académica."
+  },
+  {
+    "pregunta": "¿Cómo contacto a un profesor?",
+    "respuesta": "Puedes contactar a los profesores a través del correo institucional que aparece en el portal académico. También puedes asistir a sus horas de atención, que son publicadas al inicio de cada semestre en el tablón de anuncios del departamento."
+  }
+]
+```
+
+## Domain Examples
+
+<Tabs>
+  <Tab title="University">
+    ```json
+    {
+      "pregunta": "¿Cuándo son los exámenes finales?",
+      "respuesta": "El calendario de exámenes finales se publica en el portal académico tres semanas antes del cierre del semestre."
+    }
+    ```
+  </Tab>
+  <Tab title="Customer Support">
+    ```json
+    {
+      "pregunta": "How do I request a refund?",
+      "respuesta": "To request a refund, email support@company.com with your order number. Refunds are processed within 5–7 business days to the original payment method."
+    }
+    ```
+  </Tab>
+  <Tab title="HR FAQ">
+    ```json
+    {
+      "pregunta": "How many vacation days do I get?",
+      "respuesta": "Full-time employees receive 15 vacation days per year, accrued monthly starting from the hire date. Part-time employees receive 7 days. See the Employee Handbook Section 4.2 for details."
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Tips for Writing Effective Questions
+
+<AccordionGroup>
+  <Accordion title="Use common phrasing your users actually send">
+    `difflib` matches against the literal text of the user's message. Write `pregunta` entries using the natural phrasing your users would type, not formal or overly polished language.
+
+    **Less effective:** `¿Podría usted indicarme el procedimiento para la inscripción de asignaturas?`
+    
+    **More effective:** `¿Cómo me inscribo a una materia?`
+  </Accordion>
+
+  <Accordion title="Keep questions short">
+    `difflib.get_close_matches()` works on character-level similarity. Shorter questions have higher signal-to-noise ratio and match more reliably against user messages that are also short.
+
+    Aim for questions under 10 words. The answer (`respuesta`) can be as long as needed.
+  </Accordion>
+
+  <Accordion title="Add multiple variants for the same topic">
+    Users ask the same thing in different ways. Add separate entries for common variants:
+
+    ```json
+    { "pregunta": "¿Cómo pago la matrícula?", "respuesta": "..." },
+    { "pregunta": "¿Cuándo es el pago de matrícula?", "respuesta": "..." },
+    { "pregunta": "Fechas de pago", "respuesta": "..." }
+    ```
+  </Accordion>
+
+  <Accordion title="Avoid overlap between questions">
+    If two questions are very similar, `difflib` may match the wrong one. Keep questions topically distinct, or merge overlapping ones into a single entry with a comprehensive answer.
+  </Accordion>
+</AccordionGroup>
+
+## Adjusting the Similarity Threshold
+
+The matching cutoff is set in `mcp.py`:
+
+```python
+mas_parecida = difflib.get_close_matches(pregunta_usuario, preguntas, n=1, cutoff=0.4)
+```
+
+The `cutoff` parameter controls how similar a user message must be to a stored question for it to count as a match:
+
+| Cutoff | Behavior |
+|---|---|
+| `0.6+` | Strict — only close matches, fewer false positives |
+| `0.4` | Default — balanced permissiveness |
+| `0.2–0.3` | Permissive — more matches, higher risk of wrong context |
+
+<Tip>
+  Start with `0.4`. If users report getting wrong answers, raise it to `0.5` or `0.6`. If Yoko frequently says it can't find information for valid questions, lower it to `0.3`.
+</Tip>
+
+## Fallback Behavior
+
+When no question in `data.json` meets the similarity threshold, `buscar_contexto()` returns:
+
+```python
+return "No se encontró información relevante."
+```
+
+This string becomes the `contexto` passed to the LLM. The LLM will typically respond that it doesn't have information on the topic. You can customize this fallback message to something more user-friendly:
+
+```python
+return "El asistente no tiene información específica sobre este tema. Sugiere al usuario contactar directamente con la oficina correspondiente."
+```
+
+## Changing the Bot Persona
+
+The system prompt in `llm.py` defines the bot's identity and behavior:
+
+```python
+{"role": "system", "content": f"Eres un asistente universitario responde usando solo esta información: {contexto}"}
+```
+
+You can change the persona by editing this string:
+
+```python
+# Customer support bot
+"Eres un agente de soporte al cliente amable y profesional. Responde únicamente usando esta información: {contexto}"
+
+# HR assistant
+"You are a helpful HR assistant. Answer the employee's question using only the following information: {contexto}. If the information doesn't cover the question, say so politely."
+
+# Strict FAQ bot
+"Eres un asistente de preguntas frecuentes. Responde de forma breve y directa usando solo el siguiente contexto. No inventes información: {contexto}"
+```
+
+<Tip>
+  The instruction `"responde usando solo esta información"` (answer using only this information) is important — it prevents the LLM from hallucinating facts outside your knowledge base. Keep a version of this instruction in your system prompt.
+</Tip>

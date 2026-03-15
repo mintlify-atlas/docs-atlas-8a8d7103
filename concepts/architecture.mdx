@@ -1,0 +1,105 @@
+---
+title: 'Architecture'
+description: 'How Yoko processes a WhatsApp message end-to-end, from webhook receipt to LLM response.'
+keywords: ['architecture', 'webhook', 'flask', 'mcp', 'llm', 'whatsapp']
+---
+
+Yoko is composed of three Python modules that work together to receive a WhatsApp message, retrieve relevant context, query the Groq LLM, and send a reply.
+
+## System flow
+
+```
+User
+ └─► WhatsApp
+       └─► POST /webhook  (app.py)
+             └─► mcp.py   (context retrieval)
+                   └─► llm.py  (Groq API call)
+                         └─► WhatsApp API
+                               └─► User
+```
+
+## Module summary
+
+| Module | File | Responsibility |
+|---|---|---|
+| Webhook server | `app.py` | Receives and validates WhatsApp webhook events, dispatches messages, sends replies |
+| Context retrieval | `mcp.py` | Fuzzy-matches the user question against `data.json` to find the best-fit answer snippet |
+| LLM client | `llm.py` | Builds the prompt and calls the Groq chat completions API |
+| Knowledge base | `data.json` | Static list of question/answer pairs used as retrieval source |
+
+## Component descriptions
+
+### app.py — Flask webhook server
+
+`app.py` is the entry point. It runs a Flask application that exposes a single route, `/webhook`, on port 5000.
+
+- **GET /webhook** — Handles the one-time verification handshake required by the WhatsApp Business API. It compares the `hub.verify_token` query parameter against `VERIFY_TOKEN` and, if they match, echoes back `hub.challenge`.
+- **POST /webhook** — Receives all incoming message events. It extracts the message text and sender number from the nested JSON payload, calls `mcp.manejar_query`, and passes the response to `enviar_mensaje`.
+- **`enviar_mensaje`** — Sends the reply back through the WhatsApp Cloud API using a `POST` request with a bearer token.
+
+### mcp.py — Context retrieval
+
+`mcp.py` acts as a middleware layer between the raw user question and the LLM. It loads `data.json`, uses `difflib.get_close_matches` to find the most similar stored question, and returns the associated answer as context. If no sufficiently similar question is found, it returns a fallback string.
+
+See [Knowledge base](/concepts/knowledge-base) for details on the retrieval mechanism.
+
+### llm.py — Groq LLM client
+
+`llm.py` makes a single HTTP request to the Groq chat completions endpoint. It constructs a two-message conversation: a system message that injects the retrieved context, and a user message containing the original question. The model response is extracted from `choices[0].message.content`.
+
+See [LLM integration](/concepts/llm-integration) for the full prompt structure and parameter details.
+
+## Message lifecycle
+
+<Steps>
+  <Step title="User sends a WhatsApp message">
+    The user types a question in WhatsApp and sends it. WhatsApp forwards the event to the configured webhook URL as an HTTP POST request.
+  </Step>
+
+  <Step title="Webhook receives the POST payload">
+    `app.py` receives the JSON body. It navigates the nested structure to extract the message:
+
+    ```python
+    entry = data["entry"][0]["changes"][0]["value"]
+    mensaje = entry["messages"][0]["text"]["body"]
+    numero  = entry["messages"][0]["from"]
+    ```
+
+    `mensaje` is the text the user typed. `numero` is the sender's phone number in E.164 format.
+  </Step>
+
+  <Step title="Context retrieval in mcp.py">
+    `manejar_query(mensaje)` is called. Internally, `buscar_contexto` loads `data.json` and runs:
+
+    ```python
+    difflib.get_close_matches(pregunta_usuario, preguntas, n=1, cutoff=0.4)
+    ```
+
+    If a match is found, its stored answer is returned as `contexto`. Otherwise, a fallback string is used.
+  </Step>
+
+  <Step title="LLM call in llm.py">
+    `consultar_llm(contexto, mensaje)` sends a request to the Groq API with the context injected into the system prompt. The model generates a grounded answer based only on the provided context.
+  </Step>
+
+  <Step title="Reply sent to the user">
+    `enviar_mensaje(numero, respuesta)` posts the generated text back to the WhatsApp Cloud API, which delivers it to the user's WhatsApp conversation.
+  </Step>
+</Steps>
+
+## Data path through the webhook payload
+
+The WhatsApp Cloud API wraps every message inside several layers of nesting. The path Yoko traverses is:
+
+```
+data
+└─ ["entry"][0]
+   └─ ["changes"][0]
+      └─ ["value"]
+         ├─ ["messages"][0]["text"]["body"]   → message text
+         └─ ["messages"][0]["from"]           → sender phone number
+```
+
+<Warning>
+The `POST /webhook` handler accesses `data["entry"][0]["changes"][0]["value"]` without checking for the `messages` key first (beyond a top-level `if "messages" in entry` guard). If the webhook receives a status update or other event type that lacks a `messages` field, the exception is caught and printed but the request still returns `200 OK`.
+</Warning>

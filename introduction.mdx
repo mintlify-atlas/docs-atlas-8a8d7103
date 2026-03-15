@@ -1,0 +1,87 @@
+---
+title: Introduction
+description: Yoko is a WhatsApp AI chatbot powered by Flask webhooks and the Groq LLM (LLaMA 3) that answers user questions from a structured knowledge base.
+---
+
+<Note>
+  Yoko is an open-source project. You can find the source code on [GitHub](https://github.com/juliorbk/yoko).
+</Note>
+
+## What is Yoko?
+
+Yoko is a lightweight WhatsApp chatbot server that connects the **WhatsApp Business API** to a **Groq-powered LLM** (LLaMA 3 8B). When a user sends a WhatsApp message, Yoko:
+
+1. Receives the message through a Flask webhook
+2. Searches a local JSON knowledge base for relevant context using fuzzy matching
+3. Sends the user's question plus the matched context to the Groq LLM
+4. Returns the AI-generated response back to the user via WhatsApp
+
+It was designed as a university assistant chatbot but can be adapted to any domain by swapping the knowledge base.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="WhatsApp webhook" icon="comment-dots">
+    Receives and verifies WhatsApp Business API webhook events via a Flask HTTP server.
+  </Card>
+  <Card title="Fuzzy knowledge base" icon="magnifying-glass">
+    Matches incoming questions against a JSON knowledge base using Python's `difflib` for context-aware retrieval.
+  </Card>
+  <Card title="Groq LLM integration" icon="robot">
+    Queries the Groq API with LLaMA 3 (8B) using the matched context to generate accurate, grounded responses.
+  </Card>
+  <Card title="Easy to self-host" icon="server">
+    A minimal Python/Flask stack with no database required — just a JSON file and environment variables.
+  </Card>
+</CardGroup>
+
+## How it works
+
+```
+User (WhatsApp)
+      │
+      ▼
+POST /webhook  (Flask · app.py)
+      │
+      ▼
+buscar_contexto()  (mcp.py)
+  → fuzzy match against data.json
+      │
+      ▼
+consultar_llm()  (llm.py)
+  → Groq API / LLaMA 3 8B
+      │
+      ▼
+enviar_mensaje()  (app.py)
+  → WhatsApp Business API
+      │
+      ▼
+User receives reply
+```
+
+## Project structure
+
+| File | Purpose |
+|------|---------|
+| `app.py` | Flask app, webhook handler, and WhatsApp message sender |
+| `mcp.py` | Context retrieval via fuzzy matching against `data.json` |
+| `llm.py` | Groq API client for LLaMA 3 inference |
+| `data.json` | Your knowledge base — question/answer pairs |
+| `print.py` | Utility script to simulate webhook delivery events |
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run Yoko locally in under 10 minutes.
+  </Card>
+  <Card title="WhatsApp setup" icon="whatsapp" href="/guides/whatsapp-setup">
+    Configure your WhatsApp Business App and webhook.
+  </Card>
+  <Card title="Groq setup" icon="key" href="/guides/groq-setup">
+    Get your Groq API key and configure the LLM.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand how all components fit together.
+  </Card>
+</CardGroup>

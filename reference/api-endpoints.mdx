@@ -1,0 +1,175 @@
+---
+title: 'API endpoints'
+description: 'Reference for the two HTTP endpoints exposed by Yoko: webhook verification and incoming message handling.'
+keywords: ['webhook', 'api', 'whatsapp', 'flask', 'endpoints', 'get', 'post']
+---
+
+Yoko exposes a single Flask route at `/webhook` that handles both WhatsApp webhook verification and incoming message events.
+
+---
+
+## GET /webhook
+
+Meta calls this endpoint once when you save your webhook URL in the Meta developer dashboard. It verifies that the server is under your control by checking the `hub.verify_token` query parameter.
+
+### Query parameters
+
+<ParamField query="hub.verify_token" type="string" required>
+  The verification token Meta sends. Must match the `VERIFY_TOKEN` value configured in `app.py`.
+</ParamField>
+
+<ParamField query="hub.challenge" type="string" required>
+  A random string Meta sends. The server must echo this value back in the response body to confirm ownership.
+</ParamField>
+
+### Responses
+
+<ResponseField name="200" type="string">
+  Returns the `hub.challenge` value as plain text. Meta considers the webhook verified.
+</ResponseField>
+
+<ResponseField name="403" type="string">
+  Returns `"Token inválido"` when the token does not match. Meta will not register the webhook.
+</ResponseField>
+
+### curl example
+
+```bash
+curl -X GET "http://localhost:5000/webhook?hub.verify_token=your_token&hub.challenge=abc123"
+```
+
+Expected response when the token matches:
+
+```
+abc123
+```
+
+---
+
+## POST /webhook
+
+Meta sends a POST request to this endpoint whenever a WhatsApp user sends a message to your business number. Yoko extracts the message text and sender number, queries the LLM, and replies via the WhatsApp Cloud API.
+
+<Note>
+  This endpoint always returns HTTP 200, even when an internal error occurs. This is intentional: if Yoko returns a non-200 status, Meta will retry the webhook delivery multiple times, which can cause duplicate processing. Returning 200 immediately acknowledges receipt regardless of processing outcome.
+</Note>
+
+### Request body
+
+Meta sends a JSON payload structured as a WhatsApp Business API event. Yoko reads the first message in the first entry:
+
+```json
+{
+  "entry": [
+    {
+      "changes": [
+        {
+          "value": {
+            "messages": [
+              {
+                "from": "521234567890",
+                "text": {
+                  "body": "What are the enrollment dates?"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Fields extracted by Yoko:**
+
+<ParamField body="entry[0].changes[0].value.messages[0].text.body" type="string" required>
+  The text content of the incoming WhatsApp message. Passed to `manejar_query()` as the user's question.
+</ParamField>
+
+<ParamField body="entry[0].changes[0].value.messages[0].from" type="string" required>
+  The sender's WhatsApp phone number in E.164 format (e.g. `521234567890`). Used as the recipient for the reply.
+</ParamField>
+
+**Full payload structure:**
+
+<Expandable title="Complete WhatsApp event payload">
+
+```json
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "1234567890",
+              "phone_number_id": "PHONE_NUMBER_ID"
+            },
+            "contacts": [
+              {
+                "profile": { "name": "User Name" },
+                "wa_id": "521234567890"
+              }
+            ],
+            "messages": [
+              {
+                "from": "521234567890",
+                "id": "wamid.XXXX",
+                "timestamp": "1700000000",
+                "type": "text",
+                "text": {
+                  "body": "What are the enrollment dates?"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}
+```
+
+</Expandable>
+
+### Response
+
+<ResponseField name="200" type="string">
+  Always returns `"OK"`. Processing errors are logged server-side but do not change the HTTP status.
+</ResponseField>
+
+### curl example for local testing
+
+Use this to simulate an incoming WhatsApp message while running Flask locally:
+
+```bash
+curl -X POST http://localhost:5000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entry": [{
+      "changes": [{
+        "value": {
+          "messages": [{
+            "from": "521234567890",
+            "text": { "body": "What are the enrollment dates?" }
+          }]
+        }
+      }]
+    }]
+  }'
+```
+
+Expected response:
+
+```
+OK
+```
+
+<Tip>
+  To expose your local Flask server to Meta for testing, use [ngrok](https://ngrok.com): `ngrok http 5000`. Copy the HTTPS forwarding URL and paste it as the webhook URL in the Meta developer dashboard, appending `/webhook`.
+</Tip>

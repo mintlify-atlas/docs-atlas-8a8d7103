@@ -1,0 +1,130 @@
+---
+title: 'Configuration reference'
+description: 'All configurable values in Yoko: tokens, API keys, model settings, and fuzzy match parameters.'
+keywords: ['configuration', 'environment variables', 'api key', 'groq', 'whatsapp', 'verify token']
+---
+
+This page documents every value in Yoko that you must or can configure before running the bot.
+
+<Warning>
+  Yoko's source files currently contain hardcoded secrets (`VERIFY_TOKEN`, `GROQ_API_KEY`, bearer tokens). Committing these to version control exposes your credentials. Use `python-dotenv` to load them from a `.env` file instead.
+</Warning>
+
+## All configuration values
+
+| Variable | File | Default | Description |
+|---|---|---|---|
+| `VERIFY_TOKEN` | `app.py` | `""` (empty) | Webhook verification token. Must match the value set in the Meta dashboard. |
+| `url` in `enviar_mensaje` | `app.py` | `""` (empty) | WhatsApp Business API messages endpoint. |
+| `Authorization` header | `app.py` | `"Bearer"` (incomplete) | Bearer token for the WhatsApp Cloud API. |
+| `GROQ_API_KEY` | `llm.py` | `""` (empty) | API key for authenticating with Groq. |
+| `GROQ_MODEL` | `llm.py` | `"llama3-8b-8192"` | Groq model ID used for inference. |
+| `temperature` | `llm.py` | `0.3` | Sampling temperature for the LLM (0.0–1.0). Lower = more deterministic. |
+| System prompt | `llm.py` | See below | The `system` message sent to the LLM before each query. |
+| `data.json` path | `mcp.py` | `"data.json"` | Path to the knowledge base file. Resolved relative to the working directory. |
+| `cutoff` | `mcp.py` | `0.4` | Minimum similarity score for `difflib.get_close_matches`. |
+| `n` | `mcp.py` | `1` | Maximum number of close matches to return from the knowledge base. |
+
+---
+
+## Key settings
+
+<ParamField path="VERIFY_TOKEN" type="string" required>
+  The token Meta uses to verify your webhook URL. Set the same value in the Meta developer dashboard under **WhatsApp > Configuration > Webhook**. Any non-empty, hard-to-guess string works.
+</ParamField>
+
+<ParamField path="GROQ_API_KEY" type="string" required>
+  Your Groq Cloud API key. Obtain one from [console.groq.com](https://console.groq.com). Required for every LLM call.
+</ParamField>
+
+<ParamField path="GROQ_MODEL" type="string" default="llama3-8b-8192">
+  The Groq model identifier. `llama3-8b-8192` is fast and free-tier eligible. Other options include `llama3-70b-8192` and `mixtral-8x7b-32768`.
+</ParamField>
+
+<ParamField path="temperature" type="number" default="0.3">
+  Controls randomness in LLM output. Range: `0.0` to `1.0`. For a university assistant that should give consistent, factual answers, keep this value low (`0.1`–`0.4`).
+</ParamField>
+
+<ParamField path="cutoff" type="number" default="0.4">
+  The minimum similarity ratio for `difflib.get_close_matches` to consider a knowledge base entry a match. Lower values return more (potentially less relevant) results. Higher values require a closer match.
+</ParamField>
+
+---
+
+## System prompt
+
+The system prompt is defined in `llm.py` and controls the bot's persona and knowledge scope:
+
+```python llm.py
+messages = [
+    {"role": "system", "content": f"Eres un asistente universitario responde usando solo esta información: {contexto}"},
+    {"role": "user", "content": pregunta}
+]
+```
+
+You can customize this string to change the bot's persona, language, or instructions. The `{contexto}` placeholder is replaced at runtime with the best matching entry from `data.json`.
+
+<Tip>
+  To make the bot respond in English or adopt a different role, edit the system prompt string. For example: `"You are a helpful university assistant. Answer only using this information: {contexto}"`
+</Tip>
+
+---
+
+## Using python-dotenv
+
+Store all secrets in a `.env` file and load them at runtime.
+
+**Step 1 — Install python-dotenv:**
+
+```bash
+pip install python-dotenv
+```
+
+**Step 2 — Create a `.env` file in your project root:**
+
+```bash .env
+VERIFY_TOKEN=your_verify_token_here
+WHATSAPP_API_URL=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages
+WHATSAPP_ACCESS_TOKEN=your_whatsapp_bearer_token_here
+GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=llama3-8b-8192
+```
+
+**Step 3 — Load variables in `app.py`:**
+
+```python app.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "")
+
+def enviar_mensaje(numero, texto):
+    url = os.getenv("WHATSAPP_API_URL", "")
+    headers = {
+        "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN', '')}",
+        "Content-Type": "application/json"
+    }
+    # ...
+```
+
+**Step 4 — Load variables in `llm.py`:**
+
+```python llm.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-8b-8192")
+```
+
+<Warning>
+  Add `.env` to your `.gitignore` file immediately. Never commit it to version control.
+
+  ```bash .gitignore
+  .env
+  ```
+</Warning>

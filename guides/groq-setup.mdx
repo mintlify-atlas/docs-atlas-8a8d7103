@@ -1,0 +1,84 @@
+---
+title: "Groq API Setup"
+description: "Get a Groq API key and configure Yoko to use LLaMA 3 via the Groq inference API."
+---
+
+## Overview
+
+Yoko uses [Groq](https://groq.com/) to run LLM inference. Groq provides extremely fast inference speeds through custom hardware (LPUs), and their free tier is generous enough for development and moderate production workloads.
+
+The default model is `llama3-8b-8192` — a strong balance of speed, quality, and cost for a university assistant chatbot.
+
+## Steps
+
+<Steps>
+  <Step title="Create a Groq Account">
+    1. Go to [console.groq.com](https://console.groq.com/).
+    2. Sign up with a Google or GitHub account, or register with your email.
+    3. Verify your email if prompted.
+  </Step>
+
+  <Step title="Generate an API Key">
+    1. In the Groq Console, click **API Keys** in the left sidebar.
+    2. Click **Create API Key**.
+    3. Give it a name (e.g., `yoko-bot`) and click **Submit**.
+    4. Copy the key immediately — it will not be shown again.
+
+    <Tip>
+      Store your API key in an environment variable instead of hardcoding it in `llm.py`:
+      ```bash
+      export GROQ_API_KEY="your_api_key_here"
+      ```
+      Then read it in `llm.py`:
+      ```python
+      import os
+      GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+      ```
+      This keeps your key out of source control and makes it easy to rotate.
+    </Tip>
+  </Step>
+
+  <Step title="Set GROQ_API_KEY in llm.py">
+    Open `llm.py` and add your key (or better, load it from the environment):
+
+    ```python
+    GROQ_API_KEY = "gsk_xxxxxxxxxxxxxxxxxxxx"  # Replace with your key
+    GROQ_MODEL = "llama3-8b-8192"
+    ```
+  </Step>
+</Steps>
+
+## Model Selection
+
+The model is controlled by the `GROQ_MODEL` variable in `llm.py`. The default, `llama3-8b-8192`, is recommended for most use cases:
+
+| Model | Context Window | Speed | Quality | Notes |
+|---|---|---|---|---|
+| `llama3-8b-8192` | 8192 tokens | Very fast | Good | Default — best for cost/speed |
+| `llama3-70b-8192` | 8192 tokens | Moderate | Higher | Better reasoning, more resource use |
+| `mixtral-8x7b-32768` | 32768 tokens | Fast | Good | Longer context window |
+| `gemma-7b-it` | 8192 tokens | Fast | Good | Google's Gemma model |
+
+To switch models, edit `GROQ_MODEL` in `llm.py`:
+
+```python
+GROQ_MODEL = "llama3-70b-8192"  # Higher quality, slightly slower
+```
+
+<Tip>
+  For a university assistant handling simple FAQ-style queries, `llama3-8b-8192` is typically sufficient. Upgrade to `llama3-70b-8192` only if you notice the answers lack detail or reasoning quality.
+</Tip>
+
+## Free Tier Rate Limits
+
+Groq's free tier is generous but has limits. As of early 2025, approximate limits for `llama3-8b-8192` are:
+
+- **Requests per minute (RPM):** 30
+- **Tokens per minute (TPM):** 30,000
+- **Tokens per day (TPD):** 500,000
+
+<Note>
+  These limits apply per API key. If Yoko receives more traffic than the limits allow, requests will fail with a `429 Too Many Requests` error. Check the [Groq rate limits page](https://console.groq.com/docs/rate-limits) for the latest numbers.
+</Note>
+
+For higher limits, Groq offers paid tiers with increased quotas.

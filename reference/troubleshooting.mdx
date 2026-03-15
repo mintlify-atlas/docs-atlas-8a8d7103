@@ -1,0 +1,219 @@
+---
+title: 'Troubleshooting'
+description: 'Solutions for the most common issues when running Yoko: webhook errors, LLM failures, missing data, and WhatsApp delivery problems.'
+keywords: ['troubleshooting', 'errors', 'webhook', 'groq', 'whatsapp', 'data.json', 'ngrok']
+---
+
+This page covers the most common issues encountered when setting up and running Yoko.
+
+<AccordionGroup>
+
+  <Accordion title="Token inválido — 403 on webhook verification">
+    **Symptom:** Meta returns an error when you try to save the webhook URL in the developer dashboard. The Flask server logs show the GET request returning 403.
+
+    **Cause:** The `VERIFY_TOKEN` value in `app.py` does not match the token you entered in the Meta dashboard.
+
+    **Fix:**
+
+    1. Open the Meta developer dashboard under **WhatsApp > Configuration > Webhook**.
+    2. Note the exact string you entered in the **Verify Token** field.
+    3. Set `VERIFY_TOKEN` in `app.py` (or your `.env` file) to that exact string, including any capitalisation or spaces.
+    4. Restart Flask and click **Verify and Save** again in the dashboard.
+
+    ```python app.py
+    VERIFY_TOKEN = "my_exact_token_from_meta_dashboard"
+    ```
+
+    <Tip>
+      Use a long, random string for the token (e.g. a UUID). Short or common strings are easier to guess.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Empty or error response from the LLM">
+    **Symptom:** The bot replies with `"No se pudo generar una respuesta. Intenta con otra pregunta."` or no reply is sent at all.
+
+    **Cause:** `GROQ_API_KEY` is missing, empty, or incorrect.
+
+    **Fix:**
+
+    1. Get a valid API key from [console.groq.com](https://console.groq.com).
+    2. Set it in `llm.py` or your `.env` file:
+
+    ```python llm.py
+    GROQ_API_KEY = "gsk_your_actual_key_here"
+    ```
+
+    3. Verify the key is active in the Groq console. Keys can be revoked or expire.
+    4. Add a `print(result)` after `result = response.json()` temporarily to inspect the raw API response.
+  </Accordion>
+
+  <Accordion title="FileNotFoundError: data.json not found">
+    **Symptom:** Flask crashes on startup or when the first message arrives with `FileNotFoundError: [Errno 2] No such file or directory: 'data.json'`.
+
+    **Cause:** `mcp.py` opens `data.json` using a relative path. Python resolves this relative to the **current working directory**, not the script's location. If you run `python app.py` from a different directory, the file won't be found.
+
+    **Fix:** Always run Flask from the project root directory — the same folder that contains `data.json`:
+
+    ```bash
+    # Correct
+    cd /path/to/yoko
+    python app.py
+
+    # Incorrect — data.json won't be found
+    python /path/to/yoko/app.py
+    ```
+
+    Alternatively, use an absolute path in `mcp.py`:
+
+    ```python mcp.py
+    import os
+
+    DATA_PATH = os.path.join(os.path.dirname(__file__), "data.json")
+
+    def buscar_contexto(pregunta_usuario):
+        with open(DATA_PATH, "r", encoding="utf-8") as f:
+            # ...
+    ```
+  </Accordion>
+
+  <Accordion title="No reply sent to WhatsApp user">
+    **Symptom:** The POST webhook returns 200 and the LLM generates a response, but the user never receives a WhatsApp message. No error appears in the logs.
+
+    **Cause:** The `url` or `Authorization` header in `enviar_mensaje()` is not configured.
+
+    **Fix:** Set both values in `app.py`:
+
+    ```python app.py
+    def enviar_mensaje(numero, texto):
+        url = "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages"
+        headers = {
+            "Authorization": "Bearer YOUR_WHATSAPP_ACCESS_TOKEN",
+            "Content-Type": "application/json"
+        }
+    ```
+
+    - Replace `YOUR_PHONE_NUMBER_ID` with the Phone Number ID from the Meta dashboard under **WhatsApp > API Setup**.
+    - Replace `YOUR_WHATSAPP_ACCESS_TOKEN` with the temporary or permanent access token from the same page.
+
+    Add a `print(response.status_code, response.text)` after `requests.post(...)` to confirm the API call is succeeding.
+  </Accordion>
+
+  <Accordion title="Flask is running but no messages are received">
+    **Symptom:** Flask starts without errors, the webhook is verified in Meta, but sending a WhatsApp message produces no POST request to the server.
+
+    **Cause:** Meta cannot reach `localhost`. You need a publicly accessible HTTPS URL. This is typically because ngrok is not running or the webhook URL in Meta is stale.
+
+    **Fix:**
+
+    1. Start ngrok in a separate terminal:
+
+    ```bash
+    ngrok http 5000
+    ```
+
+    2. Copy the HTTPS forwarding URL (e.g. `https://abc123.ngrok-free.app`).
+    3. Go to the Meta developer dashboard under **WhatsApp > Configuration > Webhook**.
+    4. Update the **Callback URL** to `https://abc123.ngrok-free.app/webhook`.
+    5. Click **Verify and Save**.
+
+    <Warning>
+      The ngrok URL changes every time you restart ngrok (on the free plan). You must update the Meta webhook URL each time.
+    </Warning>
+  </Accordion>
+
+  <Accordion title='Bot replies with "No se encontró información relevante."'>
+    **Symptom:** The bot always responds with the fallback message, even for questions that should be in the knowledge base.
+
+    **Cause:** `difflib.get_close_matches` did not find any question in `data.json` with a similarity score above the `cutoff` of `0.4`. This happens when:
+    - The user's phrasing differs significantly from the stored question.
+    - The knowledge base does not cover that topic.
+    - The `cutoff` threshold is too strict.
+
+    **Fix — option 1:** Add more question variants to `data.json` to cover different phrasings:
+
+    ```json data.json
+    [
+      {
+        "pregunta": "¿Cuáles son las fechas de inscripción?",
+        "respuesta": "Las inscripciones son del 1 al 15 de enero."
+      },
+      {
+        "pregunta": "fechas de inscripción",
+        "respuesta": "Las inscripciones son del 1 al 15 de enero."
+      }
+    ]
+    ```
+
+    **Fix — option 2:** Lower the `cutoff` in `mcp.py` to accept less similar matches:
+
+    ```python mcp.py
+    mas_parecida = difflib.get_close_matches(pregunta_usuario, preguntas, n=1, cutoff=0.3)
+    ```
+
+    <Tip>
+      Lower cutoff values increase recall (more matches found) but decrease precision (more irrelevant matches). Test with representative user queries to find the right balance.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Groq 401 Unauthorized">
+    **Symptom:** The LLM call fails and `result` contains `{"error": {"message": "...", "type": "invalid_request_error", "code": "invalid_api_key"}}`.
+
+    **Cause:** The `GROQ_API_KEY` value is invalid, has been revoked, or was not set.
+
+    **Fix:**
+
+    1. Log in to [console.groq.com](https://console.groq.com) and generate a new API key.
+    2. Update the key in `llm.py` or your `.env` file.
+    3. Ensure there are no extra spaces or quotes around the key value.
+
+    ```python
+    # Correct
+    GROQ_API_KEY = "gsk_abc123..."
+
+    # Incorrect — trailing space
+    GROQ_API_KEY = "gsk_abc123... "
+    ```
+  </Accordion>
+
+  <Accordion title="Groq 429 Too Many Requests">
+    **Symptom:** The LLM occasionally fails to respond and the API returns a 429 status code. This is more common under high message volume or on the free tier.
+
+    **Cause:** You have exceeded the Groq rate limit for your account tier.
+
+    **Fix — short term:** Add a retry with exponential backoff in `llm.py`:
+
+    ```python llm.py
+    import time
+    import requests
+
+    def consultar_llm(contexto, pregunta, retries=3):
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": f"Eres un asistente universitario responde usando solo esta información: {contexto}"},
+                {"role": "user", "content": pregunta}
+            ],
+            "temperature": 0.3
+        }
+        for attempt in range(retries):
+            response = requests.post(url, headers=headers, json=data)
+            if response.status_code == 429:
+                wait = 2 ** attempt
+                time.sleep(wait)
+                continue
+            result = response.json()
+            if "choices" in result:
+                return result["choices"][0]["message"]["content"]
+            return "No se pudo generar una respuesta. Intenta con otra pregunta."
+        return "Servicio temporalmente no disponible. Intenta en unos minutos."
+    ```
+
+    **Fix — long term:** Upgrade your Groq plan or switch to a model with a higher rate limit (`llama3-70b-8192` has different limits than `llama3-8b-8192`).
+  </Accordion>
+
+</AccordionGroup>
