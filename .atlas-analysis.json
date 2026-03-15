@@ -1,0 +1,49 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "Yoko",
+  "projectDescription": "A WhatsApp AI chatbot that uses Flask webhooks and the Groq LLM (LLaMA 3) to answer user questions based on a structured knowledge base.",
+  "theme": "palm",
+  "primaryColor": "#25D366",
+  "lightColor": "#dcf8c6",
+  "darkColor": "#075e54",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Concepts",
+            "pages": ["concepts/architecture", "concepts/knowledge-base", "concepts/llm-integration"]
+          },
+          {
+            "group": "Guides",
+            "pages": ["guides/whatsapp-setup", "guides/groq-setup", "guides/deploying", "guides/customizing-knowledge-base"]
+          },
+          {
+            "group": "Reference",
+            "pages": ["reference/configuration", "reference/api-endpoints", "reference/troubleshooting"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "WhatsApp Business API webhook integration via Flask",
+    "Fuzzy-matching context retrieval from a JSON knowledge base",
+    "Groq LLM (LLaMA 3 8B) powered natural language responses",
+    "Lightweight university assistant persona with configurable context",
+    "Simple single-file architecture easy to self-host"
+  ],
+  "publicApiSurface": [
+    "GET /webhook — WhatsApp webhook verification endpoint",
+    "POST /webhook — Receives incoming WhatsApp messages and dispatches AI responses",
+    "manejar_query(mensaje_usuario) — Orchestrates context lookup and LLM response generation",
+    "buscar_contexto(pregunta_usuario) — Fuzzy-searches the knowledge base for the closest matching answer",
+    "consultar_llm(contexto, pregunta) — Sends context + question to the Groq API and returns the LLM answer",
+    "enviar_mensaje(numero, texto) — Sends a WhatsApp text message via the Business API"
+  ]
+}
